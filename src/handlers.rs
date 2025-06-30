@@ -370,24 +370,36 @@ pub async fn send_sol_handler(
 ) -> (StatusCode, AxumJson<SendSolResponse>) {
     let from = req.get("from").and_then(|v| v.as_str());
     let to = req.get("to").and_then(|v| v.as_str());
-    let lamports = req.get("lamports").and_then(|v| v.as_u64());
-    if from.is_none() || to.is_none() || lamports.is_none() {
+    let lamports = match req.get("lamports").and_then(|v| v.as_u64()) {
+        Some(0) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                AxumJson(SendSolResponse {
+                    success: false,
+                    data: None,
+                    error: Some("Amount must be greater than 0".to_string()),
+                })
+            );
+        },
+        Some(val) => val,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                AxumJson(SendSolResponse {
+                    success: false,
+                    data: None,
+                    error: Some("Missing required fields".to_string()),
+                })
+            );
+        }
+    };
+    if from.is_none() || to.is_none() {
         return (
             StatusCode::BAD_REQUEST,
             AxumJson(SendSolResponse {
                 success: false,
                 data: None,
                 error: Some("Missing required fields".to_string()),
-            })
-        );
-    }
-    if lamports.unwrap() == 0 {
-        return (
-            StatusCode::BAD_REQUEST,
-            AxumJson(SendSolResponse {
-                success: false,
-                data: None,
-                error: Some("Lamports must be greater than zero".to_string()),
             })
         );
     }
@@ -414,7 +426,7 @@ pub async fn send_sol_handler(
     let req = SendSolRequest {
         from: from.unwrap().to_string(),
         to: to.unwrap().to_string(),
-        lamports: lamports.unwrap(),
+        lamports,
     };
     let ix = system_instruction::transfer(&Pubkey::from_str(&req.from).unwrap(), &Pubkey::from_str(&req.to).unwrap(), req.lamports);
     let accounts = ix.accounts.iter().map(|meta| meta.pubkey.to_string()).collect();
@@ -440,8 +452,30 @@ pub async fn send_token_handler(
     let destination = req.get("destination").and_then(|v| v.as_str());
     let mint = req.get("mint").and_then(|v| v.as_str());
     let owner = req.get("owner").and_then(|v| v.as_str());
-    let amount = req.get("amount").and_then(|v| v.as_u64());
-    if destination.is_none() || mint.is_none() || owner.is_none() || amount.is_none() {
+    let amount = match req.get("amount").and_then(|v| v.as_u64()) {
+        Some(0) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                AxumJson(SendTokenResponse {
+                    success: false,
+                    data: None,
+                    error: Some("Amount must be greater than 0".to_string()),
+                })
+            );
+        },
+        Some(val) => val,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                AxumJson(SendTokenResponse {
+                    success: false,
+                    data: None,
+                    error: Some("Missing required fields".to_string()),
+                })
+            );
+        }
+    };
+    if destination.is_none() || mint.is_none() || owner.is_none() {
         return (
             StatusCode::BAD_REQUEST,
             AxumJson(SendTokenResponse {
@@ -485,7 +519,7 @@ pub async fn send_token_handler(
         destination: destination.unwrap().to_string(),
         mint: mint.unwrap().to_string(),
         owner: owner.unwrap().to_string(),
-        amount: amount.unwrap(),
+        amount,
     };
    
     let ix = match spl_transfer(
