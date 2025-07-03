@@ -58,7 +58,8 @@ pub struct MessageSignRequest {
 #[derive(Serialize)]
 pub struct MessageSignResponseData {
     pub signature: String,
-    pub public_key: String,
+    #[serde(rename = "pubkey")]
+    pub pubkey: String,
     pub message: String,
 }
 

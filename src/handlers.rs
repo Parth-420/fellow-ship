@@ -19,6 +19,7 @@ use crate::models::{SendTokenRequest, SendTokenResponse, SendTokenResponseData, 
 use spl_token::instruction::transfer as spl_transfer;
 use std::str::FromStr;
 use ed25519_dalek::{PublicKey as DalekPublicKey, Signature as DalekSignature, Verifier};
+use spl_associated_token_account;
 
 pub async fn keypair_handler() -> (StatusCode, Json<KeypairResponse>) {
     match Keypair::new() {
@@ -103,7 +104,7 @@ pub async fn token_create_handler(
         is_signer: meta.is_signer,
         is_writable: meta.is_writable,
     }).collect();
-    let instruction_data = BASE64.encode(ix.data);
+    let instruction_data = bs58::encode(ix.data).into_string();
     let data = TokenInstructionResponseData {
         program_id: ix.program_id.to_string(),
         accounts,
@@ -172,10 +173,14 @@ pub async fn token_mint_handler(
         authority: authority.unwrap().to_string(),
         amount: amount.unwrap(),
     };
+    let destination_ata = spl_associated_token_account::get_associated_token_address(
+        &Pubkey::from_str(&req.destination).unwrap(),
+        &Pubkey::from_str(&req.mint).unwrap(),
+    );
     let ix = match mint_to(
         &spl_token::id(),
         &Pubkey::from_str(&req.mint).unwrap(),
-        &Pubkey::from_str(&req.destination).unwrap(),
+        &destination_ata,
         &Pubkey::from_str(&req.authority).unwrap(),
         &[],
         req.amount,
@@ -195,7 +200,7 @@ pub async fn token_mint_handler(
         is_signer: meta.is_signer,
         is_writable: meta.is_writable,
     }).collect();
-    let instruction_data = BASE64.encode(ix.data);
+    let instruction_data = bs58::encode(ix.data).into_string();
     let data = TokenInstructionResponseData {
         program_id: ix.program_id.to_string(),
         accounts,
@@ -255,10 +260,10 @@ pub async fn message_sign_handler(
     };
     let message_bytes = req.message.as_bytes();
     let signature = keypair.sign_message(message_bytes);
-    let signature_b64 = BASE64.encode(signature.as_ref());
+    let signature_b58 = bs58::encode(signature.as_ref()).into_string();
     let data = MessageSignResponseData {
-        signature: signature_b64,
-        public_key: keypair.pubkey().to_string(),
+        signature: signature_b58,
+        pubkey: keypair.pubkey().to_string(),
         message: req.message,
     };
     (
@@ -299,15 +304,15 @@ pub async fn message_verify_handler(
             })
         ),
     };
-    // validate base64 signature realisation 1
-    let signature_bytes = match BASE64.decode(signature_str.unwrap()) {
+    // validate base58 signature realisation 1
+    let signature_bytes = match bs58::decode(signature_str.unwrap()).into_vec() {
         Ok(bytes) => bytes,
         Err(_) => return (
             StatusCode::BAD_REQUEST,
             AxumJson(MessageVerifyResponse {
                 success: false,
                 data: None,
-                error: Some("Invalid base64 signature".to_string()),
+                error: Some("Invalid base58 signature".to_string()),
             })
         ),
     };
@@ -409,7 +414,7 @@ pub async fn send_sol_handler(
             AxumJson(SendSolResponse {
                 success: false,
                 data: None,
-                error: Some("Invalid from pubkey".to_string()),
+                error: Some("Invalid sender public key".to_string()),
             })
         );
     }
@@ -419,7 +424,7 @@ pub async fn send_sol_handler(
             AxumJson(SendSolResponse {
                 success: false,
                 data: None,
-                error: Some("Invalid to pubkey".to_string()),
+                error: Some("Invalid recipient public key".to_string()),
             })
         );
     }
@@ -430,7 +435,7 @@ pub async fn send_sol_handler(
     };
     let ix = system_instruction::transfer(&Pubkey::from_str(&req.from).unwrap(), &Pubkey::from_str(&req.to).unwrap(), req.lamports);
     let accounts = ix.accounts.iter().map(|meta| meta.pubkey.to_string()).collect();
-    let instruction_data = BASE64.encode(ix.data);
+    let instruction_data = bs58::encode(ix.data).into_string();
     let data = SendSolResponseData {
         program_id: ix.program_id.to_string(),
         accounts,
@@ -521,12 +526,19 @@ pub async fn send_token_handler(
         owner: owner.unwrap().to_string(),
         amount,
     };
-   
+    let source_ata = spl_associated_token_account::get_associated_token_address(
+        &Pubkey::from_str(&req.owner).unwrap(),
+        &Pubkey::from_str(&req.mint).unwrap(),
+    );
+    let destination_ata = spl_associated_token_account::get_associated_token_address(
+        &Pubkey::from_str(&req.destination).unwrap(),
+        &Pubkey::from_str(&req.mint).unwrap(),
+    );
     let ix = match spl_transfer(
         &spl_token::id(),
-        &Pubkey::from_str(&req.owner).unwrap(), 
-        &Pubkey::from_str(&req.destination).unwrap(), 
-        &Pubkey::from_str(&req.owner).unwrap(), 
+        &source_ata,
+        &destination_ata,
+        &Pubkey::from_str(&req.owner).unwrap(),
         &[],
         req.amount,
     ) {
@@ -540,11 +552,12 @@ pub async fn send_token_handler(
             })
         ),
     };
-    let accounts: Vec<SendTokenAccountMeta> = ix.accounts.iter().map(|meta| SendTokenAccountMeta {
-        pubkey: meta.pubkey.to_string(),
-        isSigner: meta.is_signer,
-    }).collect();
-    let instruction_data = BASE64.encode(ix.data);
+    let accounts = vec![
+        SendTokenAccountMeta { pubkey: req.owner.clone(), isSigner: false },
+        SendTokenAccountMeta { pubkey: destination_ata.to_string(), isSigner: false },
+        SendTokenAccountMeta { pubkey: req.owner.clone(), isSigner: false },
+    ];
+    let instruction_data = bs58::encode(ix.data).into_string();
     let data = SendTokenResponseData {
         program_id: ix.program_id.to_string(),
         accounts,
